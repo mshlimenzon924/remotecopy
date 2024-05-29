@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "stdint.h": "c",
+        "in.h": "c",
+        "socket.h": "c",
+        "variant": "c",
+        "chrono": "c",
+        "both.h": "c"
+    }
+}

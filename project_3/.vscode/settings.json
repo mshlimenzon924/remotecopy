@@ -5,6 +5,7 @@
         "socket.h": "c",
         "variant": "c",
         "chrono": "c",
-        "both.h": "c"
+        "both.h": "c",
+        "__locale": "c"
     }
 }

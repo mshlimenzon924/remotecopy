@@ -5,7 +5,7 @@
 
 int main (int argc, char *argv[]) {
     checkArgs(argc, argv); /* process arguments */
-	sendErr_init(atof(argv[1]), DROP_ON, FLIP_ON, DEBUG_ON, RSEED_ON); /* turn on library to drop and corrupt packets */
+	sendErr_init(atof(argv[5]), DROP_ON, FLIP_ON, DEBUG_ON, RSEED_ON); /* turn on library to drop and corrupt packets */
 
 	processFile(argv); /* start program */
 
@@ -75,19 +75,20 @@ STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct 
 
     /* setting up for sending packet */
     int filenameLength = strlen(argv[1]); /* from-file length */
-    int payloadLen = SIZE_OF_WINDOW_SIZE_VAR + SIZE_OF_BUF_SIZE_VAR + filenameLength;
+    int32_t payloadLen = SIZE_OF_WINDOW_SIZE_VAR + SIZE_OF_BUF_SIZE_VAR + filenameLength;
     uint8_t pduBuffer[PDU_HEADER_LEN + payloadLen]; /* first PDU */
     uint8_t sending_flag = FILENAME_FLAG;
 
     uint8_t payload[payloadLen]; /* payload within PDU */
     uint32_t windowSize = htonl(atoi(argv[3]));
+    printf("WINDOW SIZE is %u\n", atoi(argv[3]));
     uint32_t bufferSize = htonl(atoi(argv[4]));
     memcpy(payload, &windowSize, SIZE_OF_WINDOW_SIZE_VAR);
     memcpy(payload + SIZE_OF_WINDOW_SIZE_VAR, &bufferSize, SIZE_OF_WINDOW_SIZE_VAR);
     memcpy(payload + SIZE_OF_WINDOW_SIZE_VAR + SIZE_OF_BUF_SIZE_VAR, argv[1], filenameLength);
     
     /* creating PDU */
-    int pduLength = createPDU(pduBuffer, *sequenceNumber, sending_flag, payload, payloadLen);
+    int32_t pduLength = createPDU(pduBuffer, *sequenceNumber, sending_flag, payload, payloadLen);
     int serverAddrLen = sizeof(struct sockaddr_in6);
 
     /* debugging */
@@ -103,7 +104,7 @@ STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct 
             /* received something from server let's check it out */
             printf("RECEIVING\n");
             uint8_t pduBuffer[PDU_HEADER_LEN + 1]; /* header + 1 byte for OK or NOT OK */
-            int recvLength = safeRecvfrom(*clientSocket, pduBuffer, PDU_HEADER_LEN + 1, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
+            int32_t recvLength = safeRecvfrom(*clientSocket, pduBuffer, PDU_HEADER_LEN + 1, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
 
             /* verify checksum */
             unsigned short result = in_cksum((unsigned short *)pduBuffer, recvLength);
@@ -178,6 +179,7 @@ STATE file_okay(int clientSocket, int *outputFileFd, char *outputFileName) {
 /* receiving data from server in-order */
 STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, int clientSocket, struct sockaddr_in6 * serverAddress, int outputFileFd, int32_t * sequenceNumber) {
     printf("In order state.\n");
+    printf("BUFFER SIZE is %u\n", buffer_size);
     STATE returnValue = DONE;
     if(*window == NULL) { /* if first time receiving */
         *window = make_window(window_size);
@@ -186,16 +188,17 @@ STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, i
     if(pollCall(TEN_SEC) != ISSUE) {
         printf("RECEIVING\n");
         /* doesn't time out because we received something */
-        int receivepduLength = PDU_HEADER_LEN + buffer_size;
+        int32_t receivepduLength = PDU_HEADER_LEN + buffer_size;
         uint8_t receiveBuffer[receivepduLength]; /* header + buffer_size */
         int serverAddrLen = sizeof(struct sockaddr_in6);
-        int recvLength = safeRecvfrom(clientSocket, receiveBuffer, receivepduLength, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
+        int32_t recvLength = safeRecvfrom(clientSocket, receiveBuffer, receivepduLength, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
+        printf("Length of Packet received is %d\n", recvLength);
 
         /* filling up variablesfrom received buffer */
         uint32_t recvSeqNumber = 0;
         uint8_t recv_flag = 0;
         uint8_t * payload_pointer = NULL;
-        uint8_t payloadLen = 0;
+        int32_t payloadLen = 0;
         int error_check = processPDU(receiveBuffer, recvLength, &recvSeqNumber, &recv_flag, &payload_pointer, &payloadLen);
 
         printf("Sequence number %u and our Current %u\n", recvSeqNumber, getCurrent(*window));
@@ -235,10 +238,10 @@ STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, i
                     /* no need to adjust window */
                     /* send EOF ACK packet */
                     uint8_t flag = EOF_ACK_FLAG;
-                    int pduLength = PDU_HEADER_LEN + EOF_ACK_PACKET_LENGTH; /* one byte to send so has something to send */
+                    int32_t pduLength = PDU_HEADER_LEN + EOF_ACK_PACKET_LENGTH; /* one byte to send so has something to send */
                     uint8_t sendBuffer[pduLength];
                     uint8_t payload[EOF_ACK_PACKET_LENGTH]; /* to hold payload */
-                    int pduSendingLength = createPDU(sendBuffer, *sequenceNumber, flag, payload, EOF_ACK_PACKET_LENGTH);
+                    int32_t pduSendingLength = createPDU(sendBuffer, *sequenceNumber, flag, payload, EOF_ACK_PACKET_LENGTH);
                     printf("SENDING\n");
                     safeSendto(clientSocket, sendBuffer, pduSendingLength, 0, (struct sockaddr *)serverAddress,  sizeof(struct sockaddr_in6)); /* sent EOF ACK packet */
                         
@@ -326,16 +329,16 @@ STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, stru
         if(pollCall(TEN_SEC) != ISSUE) {
             printf("RECEIVING\n");
             /* got something let's process it */
-            int receivepduLength = PDU_HEADER_LEN + buffer_size;
+            int32_t receivepduLength = PDU_HEADER_LEN + buffer_size;
             uint8_t receiveBuffer[receivepduLength]; /* header + buffer_size */
             int serverAddrLen = sizeof(struct sockaddr_in6);
-            int recvLength = safeRecvfrom(clientSocket, receiveBuffer, receivepduLength, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
+            int32_t recvLength = safeRecvfrom(clientSocket, receiveBuffer, receivepduLength, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
 
             /* filling up variablesfrom received buffer */
             uint32_t recvSeqNumber = 0;
             uint8_t recv_flag = 0;
             uint8_t * payload_pointer = NULL;
-            uint8_t payloadLen = 0;
+            int32_t payloadLen = 0;
             int error_check = processPDU(receiveBuffer, recvLength, &recvSeqNumber, &recv_flag, &payload_pointer, &payloadLen);
 
             /* processing what we received */
@@ -393,9 +396,9 @@ STATE flush(int clientSocket, int outputFileFd, int32_t buffer_size, WindowArray
     STATE returnvalue = BUFFERING;
     while(checkPDUValid(window, getCurrent(window))) {
         /* write to disk */
-        int receivepduLength = PDU_HEADER_LEN + buffer_size;
+        int32_t receivepduLength = PDU_HEADER_LEN + buffer_size;
         uint8_t receiveBuffer[receivepduLength]; /* header + buffer_size */
-        int payloadLen = get_PDU(window, receiveBuffer, getCurrent(window));
+        int32_t payloadLen = get_PDU(window, receiveBuffer, getCurrent(window));
         uint8_t * payload_pointer = receiveBuffer + PDU_HEADER_LEN;
 
         if (payload_pointer != NULL && payloadLen > 0) {

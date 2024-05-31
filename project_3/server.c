@@ -1,11 +1,6 @@
 /* the real rcopy project 3 file */
 #include "server.h"
 
-
-// MAKE SURE TO ADD SEND_ERR BACK AND HANDLE ZOMBIES 
-
-
-
 int main (int argc, char *argv[]) {
     int mainServerSocket = 0;
     int portNumber = 0;
@@ -19,7 +14,7 @@ int main (int argc, char *argv[]) {
     setupPollSet();
     addToPollSet(mainServerSocket);
 
-    printf("Socket %d set-up to communicate with server.\n", mainServerSocket);
+    //printf("Socket %d set-up to communicate with server.\n", mainServerSocket);
 	process_server(atof(argv[1]), mainServerSocket); /* start program */
 
 	return 0;
@@ -34,7 +29,7 @@ void handleZombies(int sig){
     }
 }
 
-void process_server(int error_rate, int clientSocket) {
+void process_server(float error_rate, int clientSocket) {
     pid_t pid = 0; /* pid for client */
     int childSocket = 0; /* socket in child */
 
@@ -53,21 +48,22 @@ void process_server(int error_rate, int clientSocket) {
     while(1) {
         /* server should never turn off even if no clients are connected and block waiting for a new client */
         if(pollCall(-1) != ISSUE) { /* waiting for a client to connect */
-            printf("Client Socket set up client %d\n", clientSocket);
+            // printf("Client Socket set up client %d\n", clientSocket);
             /* receive client information and filename so we can pass onto our child */
             recv_len = safeRecvfrom(clientSocket, buf, buffer_length, flag, (struct sockaddr *) &client, &clientAddrLen);
-            printPDU(buf, recv_len);
+            // printPDU(buf, recv_len);
             if((pid = fork()) < 0){ /* creating child to deal with client */
                 printf("Forking issue.\n");
                 exit(-1);
             }
             /* child process succesfully made */
             if(pid == 0) {
-                printf("Child fork() - child pid: %d\n", getpid());
+                // printf("Child fork() - child pid: %d\n", getpid());
                 /* set up socket for child */
                 close(clientSocket); /* no need to communicate with client with this socket so we shall close it */
                 childSocket = udpServerSetup(0); /* get new socket on child to talk with client - must use different port number x4*/
-                printf("Using Socket %d to communicate with client.\n", childSocket);
+                // printf("Using Socket %d to communicate with client.\n", childSocket);
+                printf("error rate is %f\n", error_rate);
                 sendErr_init(error_rate, DROP_ON, FLIP_ON, DEBUG_ON, RSEED_ON); /* turn on library to drop and corrupt packets */
 
                 /* and now I'm gonna let the child talk to the client and process filename */
@@ -126,7 +122,7 @@ STATE filename(int childSocket, uint32_t * sequenceNumber, struct sockaddr_in6 *
     // recevied buffer size, window size, filename in buffer
     uint8_t recv_flag = 0;
     uint8_t *payload = NULL;
-    uint8_t payloadLen = 0;
+    int32_t payloadLen = 0;
 
     /* processing PDU = if issue with packet!! */
     if(processPDU(buf, recv_len, sequenceNumber, &recv_flag, &payload, &payloadLen) < 0) {
@@ -134,37 +130,64 @@ STATE filename(int childSocket, uint32_t * sequenceNumber, struct sockaddr_in6 *
     } else {
         /* process packet given by client */
         char fname[MAX_FILENAME_LENGTH + 1];
-        memcpy(buf_size, payload, SIZE_OF_BUF_SIZE_VAR);
-        *buf_size = ntohl(*buf_size);
-        memcpy(window_size, payload + SIZE_OF_BUF_SIZE_VAR, SIZE_OF_WINDOW_SIZE_VAR);
+        memcpy(window_size, payload, SIZE_OF_WINDOW_SIZE_VAR);
         *window_size = ntohl(*window_size);
+        memcpy(buf_size, payload + SIZE_OF_WINDOW_SIZE_VAR, SIZE_OF_BUF_SIZE_VAR);
+        *buf_size = ntohl(*buf_size);
         int fname_length = payloadLen - SIZE_OF_WINDOW_SIZE_VAR - SIZE_OF_BUF_SIZE_VAR;
         memcpy(fname, payload + SIZE_OF_WINDOW_SIZE_VAR + SIZE_OF_BUF_SIZE_VAR, fname_length);
         fname[fname_length] = '\0';
 
         /* checking myself */
-        printBytes((const uint8_t *)fname, fname_length);
-        printBytes((const uint8_t *)buf_size, SIZE_OF_BUF_SIZE_VAR);
-        printBytes((const uint8_t *)window_size, SIZE_OF_WINDOW_SIZE_VAR);
+        //printf("WINDOW SIZE is %u\n", *window_size);
+        // printf("BUFFER SIZE is %u\n", *buf_size);
+        //printBytes((const uint8_t *)fname, fname_length);
+        //printBytes((const uint8_t *)buf_size, SIZE_OF_BUF_SIZE_VAR);
+        // printBytes((const uint8_t *)window_size, SIZE_OF_WINDOW_SIZE_VAR);
 
         /* preparing to send response back */
         uint8_t flag = FILENAME_RESPONSE_FLAG;
         uint8_t payload[FILENAME_RESPONSE_PACKET_LENGTH]; /* to hold payload */
-        int pduLength = PDU_HEADER_LEN + FILENAME_RESPONSE_PACKET_LENGTH;
+        int32_t pduLength = PDU_HEADER_LEN + FILENAME_RESPONSE_PACKET_LENGTH;
         uint8_t buffer[pduLength]; /* hold entire buffer */
 
+        // DELETE THIS LATER!!!
+            // Open the file in binary read mode
+        FILE *file = fopen(fname, "rb");
+        if (file == NULL) {
+            perror("Error opening file");
+            return 1;
+        }
+
+        // Seek to the end of the file
+        fseek(file, 0, SEEK_END);
+
+        // Get the current file pointer position, which is the size of the file
+        long file_size = ftell(file);
+        if (file_size == -1L) {
+            perror("Error getting file size");
+            fclose(file);
+            return 1;
+        }
+
+        // Close the file
+        fclose(file);
+
+        // Print the size of the file
+        // printf("Size of '%s' is %ld bytes\n", fname, file_size);
+
         if(((*data_file) = open(fname, O_RDONLY)) > 0) {
-            printf("Success in opening file.\n");
+            // printf("Success in opening file.\n");
             *payload = (uint8_t)FILE_OK;
             /* creating PDU with FILE_OK and sending it */
-            int pduSendingLength = createPDU(buffer, *sequenceNumber, flag, payload, FILENAME_RESPONSE_PACKET_LENGTH);
+            int32_t pduSendingLength = createPDU(buffer, *sequenceNumber, flag, payload, FILENAME_RESPONSE_PACKET_LENGTH);
             safeSendto(childSocket, buffer, pduSendingLength, 0, (struct sockaddr *)client,  sizeof(struct sockaddr_in6)); /* sent packet */
             returnValue = WINDOW_OPEN;
         } else {
-            printf("Error: Were not able to open file.\n");
+            // printf("Error: Were not able to open file.\n");
             *payload = (uint8_t)FILE_NOT_OK;
             /* creating PDU with FILE_NOT_OK */
-            int pduSendingLength = createPDU(buffer, *sequenceNumber, flag, payload, FILENAME_RESPONSE_PACKET_LENGTH);
+            int32_t pduSendingLength = createPDU(buffer, *sequenceNumber, flag, payload, FILENAME_RESPONSE_PACKET_LENGTH);
             safeSendto(childSocket, buffer, pduSendingLength, 0, (struct sockaddr *)client,  sizeof(struct sockaddr_in6)); /* sent packet */
             /* and now we are killing ourself */
             returnValue = DONE;
@@ -179,19 +202,19 @@ STATE window_open(int socketNumber, struct sockaddr_in6 * client, WindowArray **
     STATE returnValue = WINDOW_CLOSED;
     /* if window is open for first time let's make window */
     if(*window == NULL) {
-        printf("Made window.\n");
+        // printf("Made window.\n");
         *window = make_window(window_size);
     }
-    printf("Checking if window is open %d\n", checkWindowOpen(*window));
+    // printf("Checking if window is open %d\n", checkWindowOpen(*window));
     while(checkWindowOpen(*window) == TRUE) {
-        printf("Lower %d Current %d Upper %d\n", getLower(*window), getCurrent(*window), getUpper(*window)); /* checking variables */
-        int payloadLength = buffer_size;
+        //printf("Lower %d Current %d Upper %d\n", getLower(*window), getCurrent(*window), getUpper(*window)); /* checking variables */
+        int32_t payloadLength = buffer_size;
         uint8_t payload[buffer_size]; /* payload with data*/
         /* read data from disk into payload of buffer size */
         int32_t bytesRead = read(data_file, &payload, payloadLength); /* try to read payload of buffer_size */
-        printf("Read %u bytes.\n", bytesRead);
+        //printf("Read %u bytes.\n", bytesRead);
         if (bytesRead < 0) {
-            printf("Error reading buffer size.\n");
+            //printf("Error reading buffer size.\n");
             returnValue = DONE;
             break;
         } else if (bytesRead == 0) {  /* if read an EOF: returnValue = END_OF_FILE and break out of loop */
@@ -199,7 +222,7 @@ STATE window_open(int socketNumber, struct sockaddr_in6 * client, WindowArray **
             returnValue = END_OF_FILE;
             break;
         } else if (bytesRead != buffer_size) { /* didn't have full buffer size to read */
-            printf("Incomplete read for buffer size.\n");
+            // printf("Incomplete read for buffer size.\n");
             payloadLength = bytesRead;
         }
 
@@ -208,17 +231,17 @@ STATE window_open(int socketNumber, struct sockaddr_in6 * client, WindowArray **
 
         /* update buffer variables - increment current */
         if(pollCall(0) != ISSUE) { /* non-blocking call if receive something then process */
-            int recv_buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
+            int32_t recv_buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
             uint8_t recv_buf[recv_buffer_length];
             int flag = 0;
             int clientLength = sizeof(struct sockaddr_in6);
-            int recv_len = safeRecvfrom(socketNumber, recv_buf, recv_buffer_length, flag, (struct sockaddr *)client, &clientLength);
+            int32_t recv_len = safeRecvfrom(socketNumber, recv_buf, recv_buffer_length, flag, (struct sockaddr *)client, &clientLength);
 
             /* filling up variablesfrom received buffer */
             uint32_t recvSeqNumber = 0;
             uint8_t recv_flag = 0;
             uint8_t * payload_pointer = NULL;
-            uint8_t payloadLen = 0;
+            int32_t payloadLen = 0;
             int error_check = processPDU(recv_buf, recv_len, &recvSeqNumber, &recv_flag, &payload_pointer, &payloadLen);
             if (error_check == ISSUE){
                 returnValue = WINDOW_OPEN;
@@ -240,7 +263,7 @@ STATE window_open(int socketNumber, struct sockaddr_in6 * client, WindowArray **
                 int8_t resend_flag = RESENT_SREJ_DATA_PACKET_FLAG;
                 resend_data_packet(socketNumber, *window, flipped_srej_seq_num, resend_flag, buffer_size, client);
             } else { /* recevied something else this is wrong */
-                printf("Received something besides RR and SREJ from rcopy. This is incorrect.\n");
+                // printf("Received something besides RR and SREJ from rcopy. This is incorrect.\n");
                 returnValue = DONE;
                 break;
             }
@@ -252,6 +275,7 @@ STATE window_open(int socketNumber, struct sockaddr_in6 * client, WindowArray **
 void cleaning_up_with_RR(WindowArray *window, int32_t rr_seq_num){
     int32_t lower = 0;
     while( (lower = getLower(window)) < rr_seq_num){ /* until lower = rr_seq_num*/
+        printf("CLEANING UP %d rr seq num %d", getLower(window), rr_seq_num);
         remove_PDU(window, lower);
         incrementLower(window);
         incrementUpper(window);
@@ -261,9 +285,9 @@ void cleaning_up_with_RR(WindowArray *window, int32_t rr_seq_num){
 /* resending either the lowest or a specific sequence number - flag will tell us if it is from a timeout or SREJ */
 void resend_data_packet(int clientSocket, WindowArray *window, uint32_t sequence_number, int8_t flag, int32_t buffer_size, struct sockaddr_in6 * client) {
     printf("Resending Data Packet with sequence number %u\n", sequence_number);
-    int send_buffer_length = PDU_HEADER_LEN + buffer_size;
+    int32_t send_buffer_length = PDU_HEADER_LEN + buffer_size;
     uint8_t resending_buffer[send_buffer_length];
-    int pduLength = get_PDU(window, resending_buffer, (int32_t)sequence_number);
+    int32_t pduLength = get_PDU(window, resending_buffer, (int32_t)sequence_number);
     int8_t received_flag = 0;
     memcpy(&received_flag, resending_buffer + 6, 1);
     if (received_flag == DATA_PACKET_FLAG) {
@@ -275,13 +299,13 @@ void resend_data_packet(int clientSocket, WindowArray *window, uint32_t sequence
 
 /* sending a normal packet */
 void send_data_packet(int clientSocket, WindowArray *window, uint8_t *payload, int payloadLength, struct sockaddr_in6 * client) {
-    printf("Sending Data Packet with seq # %u\n", getCurrent(window));
+    // printf("Sending Data Packet with seq # %u\n", getCurrent(window));
    /* create PDU */
-    int buffer_length = PDU_HEADER_LEN + payloadLength;
+    int32_t buffer_length = PDU_HEADER_LEN + payloadLength;
     uint8_t buf[buffer_length]; /* pdu header + buffer size */
     uint8_t flag = DATA_PACKET_FLAG;
     uint32_t sequenceNum = (uint32_t)getCurrent(window); /* current is the next packet to read */
-    int pduSendingLength = createPDU(buf, sequenceNum, flag, payload, payloadLength);
+    int32_t pduSendingLength = createPDU(buf, sequenceNum, flag, payload, payloadLength);
     /* send PDU */
     safeSendto(clientSocket, buf, pduSendingLength, 0, (struct sockaddr *)client,  sizeof(struct sockaddr_in6)); /* send Data Packet */
     /* also store PDU in our window */
@@ -292,13 +316,13 @@ void send_data_packet(int clientSocket, WindowArray *window, uint8_t *payload, i
 /* sending EOF */
 void send_eof(int socketNumber, WindowArray *window, int32_t buffer_size, struct sockaddr_in6 * client) {
     printf("Sending EOF with seq # %d \n", getCurrent(window));
-    int buffer_length = PDU_HEADER_LEN + EOF_PACKET_LENGTH;
+    int32_t buffer_length = PDU_HEADER_LEN + EOF_PACKET_LENGTH;
     uint8_t buf[buffer_length]; /* pdu header + buffer size */
     uint8_t payload[EOF_PACKET_LENGTH];
     int payloadLength = EOF_PACKET_LENGTH;
     uint8_t sending_flag = EOF_FLAG;
     uint32_t sequenceNum = getCurrent(window); /* current is the next packet to read */
-    int pduSendingLength = createPDU(buf, sequenceNum, sending_flag, payload, payloadLength);
+    int32_t pduSendingLength = createPDU(buf, sequenceNum, sending_flag, payload, payloadLength);
     /* send PDU */
     safeSendto(socketNumber, buf, pduSendingLength, 0, (struct sockaddr *)client,  sizeof(struct sockaddr_in6)); /* send Data Packet */
     /* also store PDU in our window buffer */
@@ -311,17 +335,17 @@ STATE window_closed(int socketNumber, struct sockaddr_in6 * client, WindowArray 
     int count = 0;
     while(checkWindowOpen(window) == FALSE && count < 10) {
        if(pollCall(ONE_SEC) != ISSUE) { /* not a timeout */
-            int recv_buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
+            int32_t recv_buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
             uint8_t recv_buf[recv_buffer_length];
             int flag = 0;
             int serverAddrLen = sizeof(struct sockaddr_in6);
-            int recv_len = safeRecvfrom(socketNumber, recv_buf, recv_buffer_length, flag, (struct sockaddr *)client, &serverAddrLen);
+            int32_t recv_len = safeRecvfrom(socketNumber, recv_buf, recv_buffer_length, flag, (struct sockaddr *)client, &serverAddrLen);
 
             /* filling up variablesfrom received buffer */
             uint32_t recvSeqNumber = 0;
             uint8_t recv_flag = 0;
             uint8_t * payload_pointer = NULL;
-            uint8_t payloadLen = 0;
+            int32_t payloadLen = 0;
             int error_check = processPDU(recv_buf, recv_len, &recvSeqNumber, &recv_flag, &payload_pointer, &payloadLen);
             if (error_check == ISSUE){
                 returnValue = WINDOW_CLOSED;
@@ -333,8 +357,8 @@ STATE window_closed(int socketNumber, struct sockaddr_in6 * client, WindowArray 
                 int32_t rr_seq_num = 0;
                 memcpy(&rr_seq_num, payload_pointer, 4);
                 int32_t flipped_rr_seq_num = ntohl(rr_seq_num);
-                printf("RECEIVED\n");
-                printf("Received RR with seq# %u\n", flipped_rr_seq_num);
+                // printf("RECEIVED\n");
+                // printf("Received RR with seq# %u\n", flipped_rr_seq_num);
                 cleaning_up_with_RR(window, flipped_rr_seq_num);
                 /* lower should be RR now and upper = RR + window_Size - removed all frames we have confirmed we got */
                 count = 0;
@@ -379,17 +403,17 @@ STATE end_of_file(int socketNumber, WindowArray *window, int32_t buffer_size, st
         /* try polling for 1 second */
         if(pollCall(ONE_SEC) != ISSUE) { /* not a timeout */ // should be 1_sec
             printf("Received a response from Rcopy after EOF\n");
-            int recv_buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
+            int32_t recv_buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
             uint8_t recv_buf[recv_buffer_length];
             int flag = 0;
             int serverAddrLen = sizeof(struct sockaddr_in6);
-            int recv_len = safeRecvfrom(socketNumber, recv_buf, recv_buffer_length, flag, (struct sockaddr *)client, &serverAddrLen );
+            int32_t recv_len = safeRecvfrom(socketNumber, recv_buf, recv_buffer_length, flag, (struct sockaddr *)client, &serverAddrLen );
 
             /* filling up variables from received buffer */
             uint32_t recvSeqNumber = 0;
             uint8_t recv_flag = 0;
             uint8_t * payload_pointer = NULL;
-            uint8_t payloadLen = 0;
+            int32_t payloadLen = 0;
             int error_check = processPDU(recv_buf, recv_len, &recvSeqNumber, &recv_flag, &payload_pointer, &payloadLen);
             if(error_check == ISSUE) {
                 count = 0;

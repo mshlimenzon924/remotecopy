@@ -1,7 +1,7 @@
 #include "pdu.h"
 
 /* Creates pdu and calculates checksum */
-int createPDU(uint8_t * pduBuffer, uint32_t sequenceNumber, uint8_t flag, uint8_t * payload, int payloadLen) {
+int32_t createPDU(uint8_t * pduBuffer, uint32_t sequenceNumber, uint8_t flag, uint8_t * payload, int32_t payloadLen) {
     uint32_t seqNumber_Network = htonl(sequenceNumber);
     uint16_t zeroed_checksum = 0;
     
@@ -10,7 +10,7 @@ int createPDU(uint8_t * pduBuffer, uint32_t sequenceNumber, uint8_t flag, uint8_
     memcpy(pduBuffer + 6, &flag, 1);  /* Flag */
     memcpy(pduBuffer + 7, payload, payloadLen);  /* Payload */
 
-    int pduLength = PDU_HEADER_LEN + payloadLen;
+    int32_t pduLength = PDU_HEADER_LEN + payloadLen;
 
     uint16_t checksum = (uint16_t)in_cksum((unsigned short *)pduBuffer, pduLength);
     memcpy(pduBuffer + 4, &checksum, 2);
@@ -33,7 +33,7 @@ void printChars(const uint8_t *data, size_t size) {
 }
 
 /* Verifies checksum, prints out PDU information, and error messages if PDU corrupted */
-void printPDU(uint8_t * aPDU, int pduLength) {
+void printPDU(uint8_t * aPDU, int32_t pduLength) {
     int payloadLen = pduLength - PDU_HEADER_LEN;  /* payload Len */
     if(payloadLen < 0) {
         printf("Error: PDU was truncated.\n");
@@ -65,8 +65,9 @@ void printPDU(uint8_t * aPDU, int pduLength) {
 }
 
 /* Processes PDU returns -1 if there is any issues and 0 if there is none */
-int processPDU(uint8_t * aPDU, int pduLength, uint32_t *sequenceNumber, uint8_t *recv_flag, uint8_t **payload_pointer, uint8_t *payloadLen) {
+int processPDU(uint8_t * aPDU, int32_t pduLength, uint32_t *sequenceNumber, uint8_t *recv_flag, uint8_t **payload_pointer, int32_t *payloadLen) {
     *payloadLen = pduLength - PDU_HEADER_LEN;  /* payload Len */
+    printf("PAYLOAD LENGTH %d %d\n", pduLength, *payloadLen);
     if(*payloadLen < 0) {
         printf("Error: PDU was truncated.\n");
         return -1;

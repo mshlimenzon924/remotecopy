@@ -14,7 +14,8 @@ WindowArray * make_window(int32_t window_size){
         return NULL;
     }
 
-    for (int32_t i = 0; i < window_size; i++) {
+    int32_t i = 0;
+    for (i = 0; i < window_size; i++) {
         window->array[i] = NULL;
     }
 
@@ -22,6 +23,7 @@ WindowArray * make_window(int32_t window_size){
     window->current = 0;
     window->window_size = window_size;
     window->upper = window->lower + window->window_size;
+    window->highest = 0;
 
     return window;
 }
@@ -72,7 +74,7 @@ int get_PDU(WindowArray *window, uint8_t *PDU, int32_t sequence_number) {
     int32_t index = sequence_number % window->window_size;
 
     if (window->array[index] == NULL) {
-        printf("PDU does not exist.\n");
+        perror("PDU does not exist.\n");
         return -1;
     } else {
         memcpy(PDU, window->array[index]->pdu, window->array[index]->pduLength); /* move into PDU our pdu */
@@ -86,18 +88,17 @@ void add_PDU(WindowArray *window, uint8_t *PDU, int pdulength, int32_t sequence_
 
     /* if PDU already populated */
     if (window->array[index] != NULL) {
-        printf("PDU already populated.\n");
+        perror("PDU already populated.\n");
         return;
     }
 
     packet *new_pdu = (packet *)malloc(sizeof(packet));
     if (new_pdu == NULL) {
-        printf("Error: malloc PDU\n");
+        perror("Error: malloc PDU\n");
         return;
     }
     /* setting up PDU */
     new_pdu->sequenceNumber = sequence_number;
-    new_pdu->pduLength = pdulength;
     new_pdu->flag = PDU[6];
     new_pdu->pduLength = pdulength;
     memcpy(new_pdu->pdu, PDU, new_pdu->pduLength);
@@ -113,7 +114,7 @@ void remove_PDU(WindowArray *window, int32_t sequence_number) {
         free(window->array[index]);
         window->array[index] = NULL;
     } else {
-        printf("Index is not populated.\n");
+        perror("Index is not populated.\n");
     }
 }
 
@@ -121,8 +122,9 @@ void free_window(WindowArray * window) {
     if (window == NULL) {
         return;
     }
-
-    for (int32_t i = 0; i < window->window_size; i++) { /* for window size go one by one and free array */
+    
+    int32_t i = 0;
+    for (i = 0; i < window->window_size; i++) { /* for window size go one by one and free array */
         if (window->array[i] != NULL) {
             free(window->array[i]);
         }
@@ -132,5 +134,23 @@ void free_window(WindowArray * window) {
     free(window); /* free window */
 }
 
+void print_window(WindowArray *window) {
+    printf("Window state:\n");
+    printf("Window size: %d\n", window->window_size);
+    printf("Lower: %d\n", window->lower);
+    printf("Upper: %d\n", window->upper);
+    printf("Current: %d\n", window->current);
+    printf("Highest: %d\n", window->highest);
+    printf("Populated sequence numbers:\n");
+   
+    int32_t i = 0; 
+    for (i = window->lower; i < window->upper; i++) {
+        int32_t index = i % window->window_size;
+        if (window->array[index] != NULL) {
+            printf("%d ", window->array[index]->sequenceNumber);
+        }
+    }
+    printf("\n");
+}
 
 

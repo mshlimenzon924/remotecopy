@@ -19,14 +19,16 @@ int32_t createPDU(uint8_t * pduBuffer, uint32_t sequenceNumber, uint8_t flag, ui
 }
 
 void printBytes(const uint8_t *data, size_t size) {
-    for (size_t i = 0; i < size; i++) {
+     size_t i = 0;
+     for (i = 0; i < size; i++) {
         printf("%02X ", data[i]);
     }
     printf("\n");
 }
 
 void printChars(const uint8_t *data, size_t size) {
-    for (size_t i = 0; i < size; i++) {
+    size_t i = 0;
+    for (i = 0; i < size; i++) {
         printf("%c ", (char)data[i]);
     }
     printf("\n");
@@ -47,29 +49,29 @@ void printPDU(uint8_t * aPDU, int32_t pduLength) {
     /* skipping checksum didn't ask for this value */
     uint8_t flag = 0;
     memcpy(&flag, aPDU + 6, 1);  /* getting flag */
-    uint8_t *payload = aPDU + PDU_HEADER_LEN;  /* getting payload */
-
-  /* Check Sum Processing */
-    unsigned short result = in_cksum((unsigned short *)aPDU, pduLength);
-    if(result != 0) {
-        printf("Error: Checksum does not match. PDU has been corrupted.\n");
-        return;
-    }
+    // uint8_t *payload = aPDU + PDU_HEADER_LEN;  /* getting payload */
 
     /* Print PDU Contents */
     printf("Sequence Number: %u\n", sequenceNumber);
     printf("Flag: %u\n", flag);
     printf("Payload of payload length %u\n", payloadLen);
-    printBytes(payload, payloadLen);
-    printChars(payload, payloadLen);
+    printBytes(aPDU, pduLength);
+    printChars(aPDU, pduLength);
+  
+  /* Check Sum Processing */
+    unsigned short result = in_cksum((unsigned short *)aPDU, pduLength);
+    if(result != 0) {
+        printf("Error: Checksum does not match. PDU has been corrupted.\n");
+        return;
+    }  
 }
 
 /* Processes PDU returns -1 if there is any issues and 0 if there is none */
 int processPDU(uint8_t * aPDU, int32_t pduLength, uint32_t *sequenceNumber, uint8_t *recv_flag, uint8_t **payload_pointer, int32_t *payloadLen) {
     *payloadLen = pduLength - PDU_HEADER_LEN;  /* payload Len */
-    printf("PAYLOAD LENGTH %d %d\n", pduLength, *payloadLen);
+    // printf("PAYLOAD LENGTH %d %d\n", pduLength, *payloadLen);
     if(*payloadLen < 0) {
-        printf("Error: PDU was truncated.\n");
+        // printf("Error: PDU was truncated.\n");
         return -1;
     }
 
@@ -81,19 +83,19 @@ int processPDU(uint8_t * aPDU, int32_t pduLength, uint32_t *sequenceNumber, uint
     memcpy(recv_flag, aPDU + 6, 1);  /* getting flag */
     *payload_pointer = aPDU + PDU_HEADER_LEN;  /* getting payload */
 
-  /* Check Sum Processing */
+    /* Print PDU Contents */
+    // printf("Sequence Number: %u\n", *sequenceNumber);
+    // printf("Flag: %u\n", *recv_flag);
+    // printf("Payload of payload length %u\n", *payloadLen);
+    // printBytes(aPDU, pduLength);
+    // printChars(aPDU, pduLength);
+
+    /* Check Sum Processing */
     unsigned short result = in_cksum((unsigned short *)aPDU, pduLength);
     if(result != 0) {
-        printf("Error: Checksum does not match. PDU has been corrupted.\n");
+        // printf("Error: Checksum does not match. PDU has been corrupted.\n");
         return -1;
     }
-
-    /* Print PDU Contents */
-    printf("Sequence Number: %u\n", *sequenceNumber);
-    printf("Flag: %u\n", *recv_flag);
-    printf("Payload of payload length %u\n", *payloadLen);
-    printBytes(*payload_pointer, *payloadLen);
-    printChars(*payload_pointer, *payloadLen);
 
     return 0;
 }

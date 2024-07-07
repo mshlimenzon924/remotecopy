@@ -28,6 +28,7 @@
 #define FILE_NOT_OK 0               /* from-file not okay*/
 #define TEN_SEC 10000   /* use this for pollCall for 10 sec */
 #define ONE_SEC 1000   /* use this for pollCall for 1 sec */
+#define RECV_FLAG_LOCATION 6                /* where in the pdu the recv flag is stored */
 
 /* packet lengths */
 #define FILENAME_RESPONSE_PACKET_LENGTH 1   /* for OK or NOT_OK */

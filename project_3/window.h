@@ -44,3 +44,4 @@ int get_PDU(WindowArray * window, uint8_t *PDU, int32_t sequence_number); // mem
 
 void add_PDU(WindowArray *window, uint8_t *PDU, int pdulength, int32_t sequence_number); // malloc a PDU struct and add the pdu there
 void remove_PDU(WindowArray * window, int32_t sequence_number); // given a sequence number remove that pdu just make it NULL
+void print_window(WindowArray *window); // print out contents to help with debugging

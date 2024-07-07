@@ -1,15 +1,12 @@
 /* the real rcopy project 3 file */
 #include "rcopy.h"
 
-// MAKE SURE TO ADD SEND ERR BACK
-
 int main (int argc, char *argv[]) {
     checkArgs(argc, argv); /* process arguments */
-	sendErr_init(atof(argv[5]), DROP_ON, FLIP_ON, DEBUG_ON, RSEED_ON); /* turn on library to drop and corrupt packets */
+    sendErr_init(atof(argv[5]), DROP_ON, FLIP_ON, DEBUG_ON, RSEED_ON); /* turn on library to drop and corrupt packets */
 
-	processFile(argv); /* start program */
-
-	return 0;
+    processFile(argv); /* start program */
+    return 0;
 }
 
 void processFile(char * argv[]) {
@@ -32,7 +29,7 @@ void processFile(char * argv[]) {
                 state =  start(argv, &clientSocket, &server);
                 break;
             case FILENAME: /*  sends prelim information and processes response from server */
-                state = filename(argv, &clientSocket, &sendSequenceNum, &server);
+                state = filename(argv, &clientSocket, &sendSequenceNum, &server, (int32_t)atoi(argv[4]));
                 break;
             case FILE_OKAY: /* tries to open to-from file */
                 state = file_okay(clientSocket, &outputFileFd, argv[2]);
@@ -50,7 +47,6 @@ void processFile(char * argv[]) {
                 clean_up(&window, outputFileFd, clientSocket);
                 break;
             default:
-                printf("ERROR - in default state\n");
                 break;
         }
     }
@@ -61,7 +57,6 @@ STATE start(char ** argv, int * clientSocket, struct sockaddr_in6 * serverAddres
     /* returns DONE if error or FILENAME if no error */
     STATE returnvalue = FILENAME;
     *clientSocket = setupUdpClientToServer(serverAddress, argv[6], atoi(argv[7]));
-    printf("Socket %d set-up to communicate with server.\n", *clientSocket);
     /* add to poll set */
     setupPollSet();
     addToPollSet(*clientSocket);
@@ -69,19 +64,18 @@ STATE start(char ** argv, int * clientSocket, struct sockaddr_in6 * serverAddres
 }
 
 /* sending filename, window_size, and buffer_size and processes response */
-STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct sockaddr_in6 * serverAddress) {
+STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct sockaddr_in6 * serverAddress, int32_t buffer_size) {
     /* returns DONE if timeout and send 10 times OR recevied BAD FILE (NOT OK) else FILE_OKAY if all good */
     STATE returnvalue = DONE;
 
     /* setting up for sending packet */
     int filenameLength = strlen(argv[1]); /* from-file length */
     int32_t payloadLen = SIZE_OF_WINDOW_SIZE_VAR + SIZE_OF_BUF_SIZE_VAR + filenameLength;
-    uint8_t pduBuffer[PDU_HEADER_LEN + payloadLen]; /* first PDU */
+    uint8_t pduBuffer[PDU_HEADER_LEN + buffer_size]; /* first PDU */
     uint8_t sending_flag = FILENAME_FLAG;
 
     uint8_t payload[payloadLen]; /* payload within PDU */
     uint32_t windowSize = htonl(atoi(argv[3]));
-    printf("WINDOW SIZE is %u\n", atoi(argv[3]));
     uint32_t bufferSize = htonl(atoi(argv[4]));
     memcpy(payload, &windowSize, SIZE_OF_WINDOW_SIZE_VAR);
     memcpy(payload + SIZE_OF_WINDOW_SIZE_VAR, &bufferSize, SIZE_OF_WINDOW_SIZE_VAR);
@@ -91,29 +85,22 @@ STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct 
     int32_t pduLength = createPDU(pduBuffer, *sequenceNumber, sending_flag, payload, payloadLen);
     int serverAddrLen = sizeof(struct sockaddr_in6);
 
-    /* debugging */
-    printPDU(pduBuffer, pduLength);
-
     /* setting up for waiting for response saying if to-file is OK */
     /* begin polling and incrementing count each time */
     int count = 0;
     while (count < 10) {
-        printf("SENDING\n");
         safeSendto(*clientSocket, pduBuffer, pduLength, 0, (struct sockaddr *)serverAddress, serverAddrLen); /* sent packet */
         if(pollCall(ONE_SEC) != ISSUE) { /* if see some action on socket */
             /* received something from server let's check it out */
-            printf("RECEIVING\n");
-            uint8_t pduBuffer[PDU_HEADER_LEN + 1]; /* header + 1 byte for OK or NOT OK */
-            int32_t recvLength = safeRecvfrom(*clientSocket, pduBuffer, PDU_HEADER_LEN + 1, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
+            uint8_t pduBuffer[PDU_HEADER_LEN + buffer_size]; /* header + buffer_size */
+            int32_t recvLength = safeRecvfrom(*clientSocket, pduBuffer, PDU_HEADER_LEN + buffer_size, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
 
             /* verify checksum */
             unsigned short result = in_cksum((unsigned short *)pduBuffer, recvLength);
-            if(result != 0) { /* corrupted file */
-                printf("Error: Checksum does not match. PDU has been corrupted.\n");
-                /* let's try to send again */
-            } else {
+
+            if(result == 0) { /* not corrupted file */
                 uint8_t recv_flag = 0;
-                memcpy(&recv_flag, pduBuffer + 6, 1);  /* getting flag */
+                memcpy(&recv_flag, pduBuffer + RECV_FLAG_LOCATION, 1);  /* getting flag */
                 uint8_t file_response = 0;
                 memcpy(&file_response, pduBuffer + PDU_HEADER_LEN, 1);  /* getting flag */
                 if(recv_flag != FILENAME_RESPONSE_FLAG) { /* if we receive not the FILE OK/ FILE NOT OK but get a data packet */
@@ -126,13 +113,12 @@ STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct 
                 } else { /* if we received a file_okay packet */
                     if(file_response != FILE_OK) { /* recv Bad File (NOT OK) */
                         /* could not find from-file */
-                        printf("Error: file %s not found\n", argv[1]);
                         close(*clientSocket);
                         removeFromPollSet(*clientSocket);
                         returnvalue = DONE;
                         break;
                     } else { /* recv FILE OK */
-                        returnvalue = FILE_OKAY;
+                        returnvalue =  FILE_OKAY;
                         break;
                     }
                 }
@@ -143,7 +129,6 @@ STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct 
         /* so if timer expired or issue with response and count < 10 */
         count++; /* increment count */
         if(count == 10) { /* count == 10 */
-            printf("Error: Tried to send introductory information 10 times. Heard no response back from server. Ending rcopy.\n"); /* print error */
             close(*clientSocket); /* close socket */
             returnvalue = DONE; /* could not create socket */
             break;
@@ -164,13 +149,11 @@ STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct 
 /* trying to open "to-file" */
 STATE file_okay(int clientSocket, int *outputFileFd, char *outputFileName) {
     STATE returnvalue = DONE;
-    if((*outputFileFd = open(outputFileName, O_CREAT | O_TRUNC | O_WRONLY, 0600)) < 0) {
-        printf("Error on open of output file: %s.\n", outputFileName); /* cannot open to-file*/
+    if((*outputFileFd = open(outputFileName, O_CREAT | O_TRUNC | O_WRONLY, 0777)) < 0) {
         returnvalue = DONE;
         close(clientSocket);
         removeFromPollSet(clientSocket);
     } else { /* successfully opened to-file */
-        printf("Succesfully opened our output file: %s.\n", outputFileName);
         returnvalue = IN_ORDER;
     }
     return returnvalue;
@@ -178,21 +161,17 @@ STATE file_okay(int clientSocket, int *outputFileFd, char *outputFileName) {
 
 /* receiving data from server in-order */
 STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, int clientSocket, struct sockaddr_in6 * serverAddress, int outputFileFd, int32_t * sequenceNumber) {
-    printf("In order state.\n");
-    printf("BUFFER SIZE is %u\n", buffer_size);
     STATE returnValue = DONE;
     if(*window == NULL) { /* if first time receiving */
         *window = make_window(window_size);
     }
 
     if(pollCall(TEN_SEC) != ISSUE) {
-        printf("RECEIVING\n");
         /* doesn't time out because we received something */
         int32_t receivepduLength = PDU_HEADER_LEN + buffer_size;
         uint8_t receiveBuffer[receivepduLength]; /* header + buffer_size */
         int serverAddrLen = sizeof(struct sockaddr_in6);
         int32_t recvLength = safeRecvfrom(clientSocket, receiveBuffer, receivepduLength, 0, (struct sockaddr *)serverAddress, &serverAddrLen);
-        printf("Length of Packet received is %d\n", recvLength);
 
         /* filling up variablesfrom received buffer */
         uint32_t recvSeqNumber = 0;
@@ -201,7 +180,6 @@ STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, i
         int32_t payloadLen = 0;
         int error_check = processPDU(receiveBuffer, recvLength, &recvSeqNumber, &recv_flag, &payload_pointer, &payloadLen);
 
-        printf("Sequence number %u and our Current %u\n", recvSeqNumber, getCurrent(*window));
         /* processing what we received */
         if(error_check == ISSUE) {
             /* discarding it - aka ignoring it */
@@ -210,30 +188,26 @@ STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, i
             return returnValue;
         } else if(recvSeqNumber >= getCurrent(*window)){ /* if nothing is wrong with packet and seq# >= lower */
             if(recvSeqNumber == getCurrent(*window)) { /* if current = received same */
-                printf("Received recv_flag %u \n", recv_flag);
                 if(recv_flag != EOF_FLAG) { /* if we did not receive EOF */
                     /* write to disk the packet */
                     if (payload_pointer != NULL && payloadLen > 0) {
-                        printf("Writing to file.\n");
                         ssize_t bytes_written = write(outputFileFd, payload_pointer, payloadLen);
                         if (bytes_written != payloadLen) {
-                            printf("Failed to write the payload to the file.\n");
-                            returnValue = DONE;
-                            return returnValue;
+                            return DONE;
                         }
                     } else {
-                        printf("Issue with writing.\n");
+                        return DONE;
                     }
+
                     updateHighest(*window, recvSeqNumber); /* current data packet highest one seen so far */
                     /* can move up window */
                     incrementLower(*window);
                     incrementUpper(*window);
                     incrementCurrent(*window);
-                    printf("SENDING\n");
+                    /* Current got incremented so can send RR */
                     sendRR(clientSocket, getCurrent(*window), sequenceNumber, serverAddress); /* get the current data packet and send RR for it*/
                     /* return to poll(10) */
-                    returnValue = IN_ORDER;
-                    return returnValue;
+                    return IN_ORDER;
                 } else { /* if EOF Flag, send EOF ACK */
                     /* no need to adjust window */
                     /* send EOF ACK packet */
@@ -242,38 +216,26 @@ STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, i
                     uint8_t sendBuffer[pduLength];
                     uint8_t payload[EOF_ACK_PACKET_LENGTH]; /* to hold payload */
                     int32_t pduSendingLength = createPDU(sendBuffer, *sequenceNumber, flag, payload, EOF_ACK_PACKET_LENGTH);
-                    printf("SENDING\n");
                     safeSendto(clientSocket, sendBuffer, pduSendingLength, 0, (struct sockaddr *)serverAddress,  sizeof(struct sockaddr_in6)); /* sent EOF ACK packet */
                         
-                    returnValue = DONE; /* send EOF ACK and end myself */
-                    return returnValue;
+                    return DONE; /* send EOF ACK and end myself */
                 }
             } else { /* received > expected */
-                printf("Current > Expected.\n");
-                // assumption all sent to NULL unless we add something
-                printf("SENDING\n");
-                for(int32_t i = getCurrent(*window); i < recvSeqNumber; i++) {
+                int32_t i = 0;
+                for(i = getCurrent(*window); i < recvSeqNumber; i++) {
                     sendSREJ(clientSocket, i, sequenceNumber, serverAddress); /* send SREJ for all packets that we didn't get */
                 }
                 updateHighest(*window, recvSeqNumber); /* setting highest to received packet */
                 /* buffering packet */
                 add_PDU(*window, receiveBuffer, recvLength, recvSeqNumber); /* also set up recvSeqNumber to have value in it */
-                returnValue = BUFFERING;
-                return returnValue;
+                return BUFFERING;
             }
         } else { /* if already received */
-            printf("Already received seq #.\n");
-            /* discarding it - aka ignoring it */
-            printf("SENDING\n");
-            sendRR(clientSocket, getLower(*window), sequenceNumber, serverAddress); /* resending RR of the last sent data packet */
-            /* return to poll(10) */
-            returnValue = IN_ORDER;
-            return returnValue;
+            sendRR(clientSocket, getLower(*window), sequenceNumber, serverAddress);
+            return IN_ORDER;
         }
     } else { /* if we time out */
-        printf("Timeout: Waited for data packets for 10 seconds. Heard nothing from server. Program exiting.\n");
-        returnValue = DONE;
-        return returnValue;
+        return DONE;
     }
     return returnValue;
 }
@@ -282,20 +244,19 @@ void clean_up(WindowArray **window, int outputFileFd, int serverSocket) {
     free_window(*window); /* free window */
     if (outputFileFd > 0) {  /* close file */
         if (close(outputFileFd) == -1) {
-            printf("Error closing outputFileFd.\n");
+            perror("Error closing outputFileFd.\n");
         }
     }
 
     if (serverSocket > 0) { /* close socket */
         if (close(serverSocket) == -1) {
-            printf("Error closing socket.\n");
+            perror("Error closing socket.\n");
         }
     }
 }
 
 /* Sending a RR to server with this sequenceNumber */
 void sendRR(int socketNum, int32_t rr_Number, int32_t * sending_seq, struct sockaddr_in6 * serverAddress){
-    printf("Sending RR %u\n", rr_Number);
     int8_t sending_flag = RR_FLAG;
     int buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
     uint8_t buf[buffer_length]; /* pdu header + sequence number */
@@ -309,7 +270,6 @@ void sendRR(int socketNum, int32_t rr_Number, int32_t * sending_seq, struct sock
 
 /* Sending a SREJ to server with this sequenceNumber */
 void sendSREJ(int socketNum, int32_t srej_number, int32_t * sending_seq, struct sockaddr_in6 * serverAddress){
-    printf("Sending SREJ %u\n", srej_number);
     int8_t sending_flag = SREJ_FLAG;
     int buffer_length = PDU_HEADER_LEN + RCOPY_RESPONSES_PACKET_LENGTH;
     uint8_t buf[buffer_length]; /* pdu header + sequence number */
@@ -323,11 +283,9 @@ void sendSREJ(int socketNum, int32_t srej_number, int32_t * sending_seq, struct 
 
 /* receiving data from server not in-order */
 STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, struct sockaddr_in6 * serverAddress, int outputFileFd, int32_t * sequenceNumber) {
-    printf("Buffering state.\n");
     STATE returnValue = FLUSH;
     while(1) {
         if(pollCall(TEN_SEC) != ISSUE) {
-            printf("RECEIVING\n");
             /* got something let's process it */
             int32_t receivepduLength = PDU_HEADER_LEN + buffer_size;
             uint8_t receiveBuffer[receivepduLength]; /* header + buffer_size */
@@ -349,7 +307,9 @@ STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, stru
                 add_PDU(window, receiveBuffer, recvLength, recvSeqNumber); /*add PDU to buffer*/
                 /* send SREJ for any packet in between new highest */
                 if(getHighest(window) < recvSeqNumber) {
-                    for(int32_t i = getHighest(window); i < recvSeqNumber; i++) {
+                    int32_t i = 0;
+                    for(i = getHighest(window) + 1; i < recvSeqNumber; i++) {
+			        /* no need to send a SREJ for the one we already have */
                         sendSREJ(clientSocket, i, sequenceNumber, serverAddress); /* send SREJ for all packets that we didn't get */
                     }
                 }
@@ -361,7 +321,6 @@ STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, stru
                     if (payload_pointer != NULL && payloadLen > 0) {
                         ssize_t bytes_written = write(outputFileFd, payload_pointer, payloadLen);
                         if (bytes_written != payloadLen) {
-                            printf("Failed to write the payload to the file.\n");
                             returnValue = DONE;
                             break;
                         }
@@ -370,21 +329,19 @@ STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, stru
                     incrementLower(window);
                     incrementUpper(window);
                     incrementCurrent(window);
-                    printf("SENDING\n");
+                    /* sending RR since have incremented current */ 
+                    // send from lowest + 1 up to current rrs 
                     sendRR(clientSocket, getCurrent(window), sequenceNumber, serverAddress); /* get the current data packet and send RR for it*/
-                    returnValue = FLUSH;
-                    break;
-                } /* never gonna get an EOF_FLAG cause that means that we have one higher than it and we shouldn't have a sequence # higher than EOF */
+                    return FLUSH;
+                } /* never gonna get an EOF_FLAG cause that means that we have one higher than it and we shouldn't have a sequence # higher than EOF
+                     since we in buffering mode - so there is no way the we have a packet past EOF */
             } else { /* if already received */
                 /* discarding it - aka ignoring it */
-                printf("SENDING\n");
-                sendRR(clientSocket, getLower(window), sequenceNumber, serverAddress); /* resending RR of the last sent data packet */
+                sendRR(clientSocket, getCurrent(window), sequenceNumber, serverAddress); /* resending RR of the last sent data packet */
                 /* return to poll(10) */
             }
         } else { /* if we time out */
-            printf("Waited for data packets for 10 seconds. Heard nothing from server. Program exiting.\n");
-            returnValue = DONE;
-            break;
+            return DONE;
         }
     }
     return returnValue;
@@ -392,7 +349,6 @@ STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, stru
 
 /* while we were buffering and storing past pdus, let's now flush */
 STATE flush(int clientSocket, int outputFileFd, int32_t buffer_size, WindowArray *window, struct sockaddr_in6 * serverAddress, int32_t * sequenceNumber) {
-    printf("Flush state.\n");
     STATE returnvalue = BUFFERING;
     while(checkPDUValid(window, getCurrent(window))) {
         /* write to disk */
@@ -401,22 +357,32 @@ STATE flush(int clientSocket, int outputFileFd, int32_t buffer_size, WindowArray
         int32_t payloadLen = get_PDU(window, receiveBuffer, getCurrent(window));
         uint8_t * payload_pointer = receiveBuffer + PDU_HEADER_LEN;
 
+	    /* if have gotten an EOF packet let's not write but just end it - there is nothing after it so we safe to leave */
+	    if(receiveBuffer[RECV_FLAG_LOCATION] == EOF_FLAG) {
+            uint8_t flag = EOF_ACK_FLAG;
+            int32_t pduLength = PDU_HEADER_LEN + EOF_ACK_PACKET_LENGTH; /* one byte to send so has something to send */
+            uint8_t sendBuffer[pduLength];
+            uint8_t payload[EOF_ACK_PACKET_LENGTH]; /* to hold payload */
+            int32_t pduSendingLength = createPDU(sendBuffer, *sequenceNumber, flag, payload, EOF_ACK_PACKET_LENGTH);
+            safeSendto(clientSocket, sendBuffer, pduSendingLength, 0, (struct sockaddr *)serverAddress,  sizeof(struct sockaddr_in6)); /* sent EOF ACK packet */
+            return DONE; /* send EOF ACK and end myself */
+        }
+
         if (payload_pointer != NULL && payloadLen > 0) {
-            ssize_t bytes_written = write(outputFileFd, payload_pointer, payloadLen);
-            if (bytes_written != payloadLen) {
-                printf("Failed to write the payload to the file.\n");
-                returnvalue = DONE;
-                break;
+            ssize_t bytes_written = write(outputFileFd, payload_pointer, payloadLen - PDU_HEADER_LEN);
+            if (bytes_written != (payloadLen - PDU_HEADER_LEN)) {
+                return DONE;
             }
         }
+        /* clean up cause now wrote pdu */
+        remove_PDU(window, getCurrent(window));
         incrementCurrent(window);
         incrementUpper(window);
         incrementLower(window);
-        printf("SENDING\n");
+	// since incremented current send RR for it
         sendRR(clientSocket, getCurrent(window), sequenceNumber, serverAddress); /* send RR for that sequence number*/
         if(getCurrent(window) > getHighest(window)) {
-            returnvalue = IN_ORDER;
-            break;
+            return IN_ORDER;
         }
     }
     /* if we reached a current that is not valid in the buffer */

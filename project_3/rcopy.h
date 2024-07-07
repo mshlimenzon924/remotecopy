@@ -11,7 +11,7 @@ enum State /* listing all the states server has */
 
 void processFile(char * argv[]);
 STATE start(char ** argv, int * clientSocket, struct sockaddr_in6 * serverAddress);
-STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct sockaddr_in6 * serverAddress);
+STATE filename(char **argv, int *clientSocket, int32_t * sequenceNumber, struct sockaddr_in6 * serverAddress, int32_t buffer_size);
 STATE file_okay(int clientSocket, int *outputFileFd, char *outputFileName);
 STATE in_order(WindowArray **window, int32_t window_size, int32_t buffer_size, int clientSocket, struct sockaddr_in6 * serverAddress, int outputFileFd, int32_t * sequenceNumber);
 STATE buffering(WindowArray *window, int32_t buffer_size, int clientSocket, struct sockaddr_in6 * serverAddress, int outputFileFd, int32_t * sequenceNumber);
